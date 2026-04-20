@@ -1,0 +1,187 @@
+{
+  "name": "ranking-restaurantes",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ranking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        1744,
+        1120
+      ],
+      "id": "d8d0cd56-9b03-4581-b845-2d54f97a25ab",
+      "name": "Recibir visita",
+      "webhookId": "52be1289-29c9-4a05-b845-ca219d33b85c"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT nombre, categoria, ciudad,\n       calificacion, pedidos_mes, tiempo_entrega_min\nFROM restaurantes\nWHERE activo = TRUE\nORDER BY pedidos_mes DESC\nLIMIT 10;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1952,
+        992
+      ],
+      "id": "76dafee1-c9c7-4c3e-8870-9679aaf35e5c",
+      "name": "Ranking restaurantes",
+      "credentials": {
+        "postgres": {
+          "id": "ZoX4vkFm7Wy7Ztep",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT r.nombre,\n       t_actual.pedidos AS pedidos_esta_semana,\n       t_anterior.pedidos AS pedidos_semana_anterior,\n       ROUND(((t_actual.pedidos - t_anterior.pedidos)::numeric\n              / t_anterior.pedidos) * 100, 1) AS crecimiento_pct\nFROM tendencias t_actual\nJOIN tendencias t_anterior\n     ON t_actual.restaurante_id = t_anterior.restaurante_id\n    AND t_anterior.semana = CURRENT_DATE - 7\n    AND t_actual.semana = CURRENT_DATE\nJOIN restaurantes r ON r.id = t_actual.restaurante_id\nORDER BY crecimiento_pct DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1952,
+        1232
+      ],
+      "id": "c7e29653-a81b-4ed4-a987-042815a68f41",
+      "name": "Tendencias",
+      "credentials": {
+        "postgres": {
+          "id": "ZoX4vkFm7Wy7Ztep",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2176,
+        1120
+      ],
+      "id": "85db8cb3-04bc-4035-90ff-4fcdfe32dba0",
+      "name": "Unir datos"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Separar ranking y tendencias\nconst ranking = items.filter(i => i.json.pedidos_mes !== undefined).map(i => i.json);\nconst tendencias = items.filter(i => i.json.crecimiento_pct !== undefined).map(i => i.json);\n\n// Colores por categoría\nconst colores = {\n  'Pizza':'#7F77DD',\n  'Sushi':'#1D9E75',\n  'Burger':'#EF9F27',\n  'Hamburguesa':'#EF9F27',\n  'Mexicana':'#D85A30',\n  'Saludable':'#378ADD'\n};\n\n// Top 5 para la gráfica\nconst top5 = ranking.slice(0, 5);\nconst barLabels = JSON.stringify(top5.map(r => r.nombre));\nconst barPedidos = JSON.stringify(top5.map(r => r.pedidos_mes));\nconst barColors = JSON.stringify(top5.map(r => colores[r.categoria] || '#888'));\n\n// Filas tabla ranking\nconst filas = ranking.map((r, i) => {\n  const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}`;\n  const color = colores[r.categoria] || '#888';\n  const estrellas = '★'.repeat(Math.round(r.calificacion)) + '☆'.repeat(5 - Math.round(r.calificacion));\n  return `<tr>\n    <td style=\"font-size:18px;text-align:center\">${medalla}</td>\n    <td><strong>${r.nombre}</strong><br><span style=\"font-size:11px;color:#aaa\">${r.ciudad}</span></td>\n    <td><span style=\"background:${color}22;color:${color};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600\">${r.categoria}</span></td>\n    <td style=\"color:#f5a623\">${estrellas} <span style=\"color:#aaa;font-size:11px\">${r.calificacion}</span></td>\n    <td style=\"font-weight:600\">${parseInt(r.pedidos_mes).toLocaleString('es-CO')}</td>\n    <td style=\"color:#1D9E75\">${r.tiempo_entrega_min} min</td>\n  </tr>`;\n}).join('');\n\n// Filas tendencias\nconst filasT = tendencias.map(t => {\n  const pct = parseFloat(t.crecimiento_pct);\n  const color = pct >= 0 ? '#1D9E75' : '#E24B4A';\n  const arrow = pct >= 0 ? '▲' : '▼';\n  return `<tr>\n    <td><strong>${t.nombre}</strong></td>\n    <td>${parseInt(t.pedidos_semana_anterior).toLocaleString('es-CO')}</td>\n    <td>${parseInt(t.pedidos_esta_semana).toLocaleString('es-CO')}</td>\n    <td style=\"color:${color};font-weight:700\">${arrow} ${Math.abs(pct)}%</td>\n  </tr>`;\n}).join('');\n\nconst ahora = new Date().toLocaleString('es-CO', {\n  dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Bogota'\n});\n\nconst html = `<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n  <title>Ranking de Restaurantes</title>\n  <meta http-equiv=\"refresh\" content=\"300\">\n  <script src=\"https://cdn.jsdelivr.net/npm/chart.js\"><\\/script>\n  <style>\n    *{box-sizing:border-box;margin:0;padding:0}\n    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f3fb;color:#1a1a2e;min-height:100vh}\n    header{background:#7F77DD;padding:24px 32px;color:#fff}\n    header h1{font-size:24px;font-weight:700;letter-spacing:-.3px}\n    header p{font-size:13px;opacity:.75;margin-top:4px}\n    .container{max-width:960px;margin:0 auto;padding:28px 20px}\n    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}\n    @media(max-width:640px){.grid-2{grid-template-columns:1fr}}\n    .card{background:#fff;border-radius:14px;padding:22px 24px;border:0.5px solid rgba(0,0,0,0.07)}\n    .card-title{font-size:12px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}\n    .kpi-val{font-size:28px;font-weight:700;color:#7F77DD;line-height:1.2}\n    .kpi-val.green{color:#1D9E75}\n    .kpi-sub{font-size:12px;color:#aaa;margin-top:4px}\n    canvas{width:100%!important}\n    table{width:100%;border-collapse:collapse;font-size:13px}\n    th{color:#aaa;font-weight:500;padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em}\n    td{padding:10px 10px;border-bottom:1px solid #fafafa;vertical-align:middle}\n    tr:last-child td{border-bottom:none}\n    tr:hover td{background:#faf9ff}\n    .footer{text-align:center;font-size:11px;color:#bbb;padding:20px;margin-top:8px}\n    .live-dot{display:inline-block;width:7px;height:7px;background:#1D9E75;border-radius:50%;margin-right:5px;animation:pulse 2s infinite}\n    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}\n  <\\/style>\n<\\/head>\n<body>\n  <header>\n    <h1>Ranking de Restaurantes</h1>\n    <p><span class=\"live-dot\"><\\/span>Actualizado: ${ahora}<\\/p>\n  <\\/header>\n\n  <div class=\"container\">\n    <div class=\"grid-2\">\n      <div class=\"card\">\n        <div class=\"card-title\">Restaurante #1 esta semana<\\/div>\n        <div class=\"kpi-val\">${ranking[0]?.nombre || '—'}<\\/div>\n        <div class=\"kpi-sub\">${parseInt(ranking[0]?.pedidos_mes || 0).toLocaleString('es-CO')} pedidos este mes<\\/div>\n      <\\/div>\n      <div class=\"card\">\n        <div class=\"card-title\">Mayor crecimiento semanal<\\/div>\n        <div class=\"kpi-val green\">${tendencias[0]?.nombre || '—'}<\\/div>\n        <div class=\"kpi-sub\">▲ ${tendencias[0]?.crecimiento_pct || 0}% vs semana anterior<\\/div>\n      <\\/div>\n    <\\/div>\n\n    <div class=\"card\" style=\"margin-bottom:20px\">\n      <div class=\"card-title\">Top 5 — pedidos del mes<\\/div>\n      <canvas id=\"barChart\" height=\"90\"><\\/canvas>\n    <\\/div>\n\n    <div class=\"card\" style=\"margin-bottom:20px\">\n      <div class=\"card-title\">Ranking completo<\\/div>\n      <table>\n        <tr><th>#<\\/th><th>Restaurante<\\/th><th>Categoría<\\/th><th>Calificación<\\/th><th>Pedidos<\\/th><th>Entrega<\\/th><\\/tr>\n        ${filas}\n      <\\/table>\n    <\\/div>\n\n    <div class=\"card\">\n      <div class=\"card-title\">Tendencias — crecimiento semana a semana<\\/div>\n      <table>\n        <tr><th>Restaurante<\\/th><th>Sem. anterior<\\/th><th>Esta semana<\\/th><th>Cambio<\\/th><\\/tr>\n        ${filasT}\n      <\\/table>\n    <\\/div>\n  <\\/div>\n\n  <div class=\"footer\">Construido con n8n + PostgreSQL · Ranking Restaurantes<\\/div>\n\n  <script>\n    new Chart(document.getElementById('barChart'), {\n      type: 'bar',\n      data: {\n        labels: ${barLabels},\n        datasets: [{\n          label: 'Pedidos del mes',\n          data: ${barPedidos},\n          backgroundColor: ${barColors},\n          borderRadius: 8,\n          borderSkipped: false\n        }]\n      },\n      options: {\n        responsive: true,\n        plugins: { legend: { display: false } },\n        scales: {\n          y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { color: '#aaa', font: { size: 11 } } },\n          x: { grid: { display: false }, ticks: { color: '#555', font: { size: 11 } } }\n        }\n      }\n    });\n  <\\/script>\n<\\/body>\n<\\/html>`;\n\nreturn [{ json: { html } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        1120
+      ],
+      "id": "e0d70d5d-21ea-407f-a027-6ac295471f5b",
+      "name": "Armar HTML"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2624,
+        1120
+      ],
+      "id": "3e43623a-6dec-4092-8bb4-ddbc9d8edc5a",
+      "name": "Responder HTML"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recibir visita": {
+      "main": [
+        [
+          {
+            "node": "Ranking restaurantes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Tendencias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ranking restaurantes": {
+      "main": [
+        [
+          {
+            "node": "Unir datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tendencias": {
+      "main": [
+        [
+          {
+            "node": "Unir datos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Unir datos": {
+      "main": [
+        [
+          {
+            "node": "Armar HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar HTML": {
+      "main": [
+        [
+          {
+            "node": "Responder HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "4662e443-1af9-42b9-906a-8cd707af78a3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d03888bb0cda25df4a1ad3851243475954ca91ddd3233540aafb991b7f0a1834"
+  },
+  "id": "DjEkzzsVawPShGs5",
+  "tags": []
+}
