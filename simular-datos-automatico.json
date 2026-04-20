@@ -1,0 +1,190 @@
+{
+  "name": "simular-datos-automatico",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        160
+      ],
+      "id": "3268bcb0-6504-4481-bf7b-f920bf74bbc5",
+      "name": "Cada día medianoche"
+    },
+    {
+      "parameters": {
+        "jsCode": "const hoy = new Date();\nconst esLunes = hoy.getDay() === 1;\nreturn [{ json: { esLunes } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        160
+      ],
+      "id": "ae8de004-7a35-461a-9b6e-c99a1d1c2eb2",
+      "name": "¿Es lunes?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const restaurantes = [1, 2, 3, 4, 5, 6, 7];\nconst updates = restaurantes.map(id => {\n  const base = id <= 3 ? 60 : id <= 5 ? 40 : 25;\n  const variacion = Math.floor(Math.random() * 30) - 10;\n  const pedidosNuevos = Math.max(10, base + variacion);\n  return { id, pedidosNuevos };\n});\nreturn updates.map(u => ({ json: u }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1361133f-6bfe-4439-ab9b-ab5c6cc8c68f",
+      "name": "Generar pedidos del día"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE restaurantes\nSET pedidos_mes = pedidos_mes + {{ $json.pedidosNuevos }}\nWHERE id = {{ $json.id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        0
+      ],
+      "id": "aec9fbdb-084a-4ebe-96c9-323339f0fa88",
+      "name": "Actualizar pedidos_mes",
+      "credentials": {
+        "postgres": {
+          "id": "ZoX4vkFm7Wy7Ztep",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.esLunes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ],
+      "id": "b1fabb80-b923-4291-880c-f65ed3a87f1f",
+      "name": "Si es lunes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tendencias (restaurante_id, semana, pedidos, ingresos_cop)\nSELECT \n  id AS restaurante_id,\n  CURRENT_DATE AS semana,\n  CASE \n    WHEN id <= 2 THEN FLOOR(300 + RANDOM() * 100)::int\n    WHEN id <= 4 THEN FLOOR(200 + RANDOM() * 80)::int\n    ELSE FLOOR(130 + RANDOM() * 60)::int\n  END AS pedidos,\n  CASE \n    WHEN id <= 2 THEN FLOOR((300 + RANDOM() * 100) * 35000)::bigint\n    WHEN id <= 4 THEN FLOOR((200 + RANDOM() * 80) * 35000)::bigint\n    ELSE FLOOR((130 + RANDOM() * 60) * 35000)::bigint\n  END AS ingresos_cop\nFROM restaurantes\nWHERE activo = TRUE\nON CONFLICT (restaurante_id, semana) DO UPDATE\n  SET pedidos = EXCLUDED.pedidos,\n      ingresos_cop = EXCLUDED.ingresos_cop;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        304
+      ],
+      "id": "7657936d-d836-46ef-8815-14ca4695b234",
+      "name": "Insertar tendencias semanales",
+      "credentials": {
+        "postgres": {
+          "id": "ZoX4vkFm7Wy7Ztep",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cada día medianoche": {
+      "main": [
+        [
+          {
+            "node": "Generar pedidos del día",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Es lunes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar pedidos del día": {
+      "main": [
+        [
+          {
+            "node": "Actualizar pedidos_mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es lunes?": {
+      "main": [
+        [
+          {
+            "node": "Si es lunes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Si es lunes": {
+      "main": [
+        [
+          {
+            "node": "Insertar tendencias semanales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e196c230-0094-4294-ac38-a6ddfd5575ff",
+  "meta": {
+    "instanceId": "d03888bb0cda25df4a1ad3851243475954ca91ddd3233540aafb991b7f0a1834"
+  },
+  "id": "zXrRqCOqKeb8qD3i",
+  "tags": []
+}
